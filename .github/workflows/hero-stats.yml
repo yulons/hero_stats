@@ -1,0 +1,41 @@
+name: heroStats
+
+# OpenDota's /api/heroStats, mirrored every 6 hours for the Dota Forge app.
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Both workflows commit to main; never let them race.
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch heroStats
+        run: python3 scripts/fetch_hero_stats.py
+        env:
+          OPENDOTA_API_KEY: ${{ secrets.OPENDOTA_API_KEY }}
+      - name: Commit if changed
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/heroStats.json
+          if git diff --cached --quiet; then
+            echo 'No change'
+            exit 0
+          fi
+          git commit -m "heroStats $(date -u +%Y-%m-%dT%H:%MZ)"
+          git pull --rebase
+          git push

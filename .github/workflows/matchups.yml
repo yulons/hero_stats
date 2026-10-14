@@ -1,0 +1,64 @@
+name: Matchup matrix
+
+# Rebuilds the matchup matrix from ~2,000 /publicMatches pages (the last 14
+# days, 3 rank brackets) and publishes it sealed as data/hero_matchups.bin
+# (secret PACK_KEY). Takes 35-60 minutes; OpenDota's free tier allows ~3,000
+# calls a day per IP, so once a week is plenty.
+on:
+  schedule:
+    - cron: '23 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install cryptography
+      - name: Build matrix
+        run: >
+          python3 scripts/build_matchup_matrix.py
+          --out build/hero_matchups.json
+          --hero-stats data/heroStats.json
+          --cache build/matchup_pages
+        env:
+          OPENDOTA_API_KEY: ${{ secrets.OPENDOTA_API_KEY }}
+      - name: Check the sample
+        # A run cut short by rate limits still writes a file; keep the old
+        # one unless this sample is close to a full run's (~130k matches).
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+          m = json.load(open('build/hero_matchups.json'))
+          total = sum(m['matches'])
+          print(f'{total} matches, brackets {m["matches"]}')
+          if total < 80000 or min(m['matches']) < 15000 or len(m['heroes']) < 120:
+              sys.exit('Sample too small; keeping the previous matrix')
+          EOF
+      - name: Seal
+        run: python3 scripts/seal_pack.py build/hero_matchups.json data/hero_matchups.bin
+        env:
+          PACK_KEY: ${{ secrets.PACK_KEY }}
+      - name: Commit
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add data/hero_matchups.bin
+          if git diff --cached --quiet; then
+            echo 'No change'
+            exit 0
+          fi
+          git commit -m "Matchup matrix $(date -u +%Y-%m-%d)"
+          git pull --rebase
+          git push
