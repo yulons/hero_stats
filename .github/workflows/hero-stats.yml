@@ -1,9 +1,12 @@
 name: heroStats
 
-# OpenDota's /api/heroStats, mirrored every 6 hours for the Dota Forge app.
+# OpenDota's /api/heroStats, mirrored once a day for the Dota Forge app. The
+# numbers barely move in a day; on patch day, run it by hand (Run workflow).
+# 21:37 UTC, off the hour: GitHub delays scheduled runs by up to ~5 hours,
+# which still lands before evening in Russia, where most players are.
 on:
   schedule:
-    - cron: '17 */6 * * *'
+    - cron: '37 21 * * *'
   workflow_dispatch:
 
 permissions:
@@ -37,5 +40,15 @@ jobs:
             exit 0
           fi
           git commit -m "heroStats $(date -u +%Y-%m-%dT%H:%MZ)"
-          git pull --rebase
+          # GitHub sometimes fires a schedule twice; if the other run already
+          # pushed its copy, keep that one instead of failing.
+          if ! git pull --rebase; then
+            git rebase --abort
+            echo 'Another run pushed first; keeping its copy'
+            exit 0
+          fi
           git push
+      - name: Purge jsDelivr
+        # The app falls back to jsDelivr when GitHub is blocked; without a
+        # purge it serves the old file for up to 12 hours.
+        run: curl -fsS https://purge.jsdelivr.net/gh/yulons/hero_stats@main/data/heroStats.json || echo 'Purge failed; jsDelivr catches up within 12 hours'

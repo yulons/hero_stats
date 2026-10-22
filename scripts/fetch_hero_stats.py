@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Mirrors OpenDota's /api/heroStats into data/heroStats.json.
 
-Run by .github/workflows/hero-stats.yml every 6 hours. The file is OpenDota's
+Run by .github/workflows/hero-stats.yml once a day. The file is OpenDota's
 response (minified) plus one field, `complexity`: Valve's 1-3 hero complexity
 from each hero's npc file (dotabuff/d2vpkr), which the app shows and which
 OpenDota doesn't carry. The app parses it exactly like the live endpoint.

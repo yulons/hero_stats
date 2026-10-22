@@ -7,7 +7,7 @@ take several seconds to answer; a static copy here loads in well under one.
 
 | File | Source | Refreshed |
 |---|---|---|
-| `data/heroStats.json` | [OpenDota `/api/heroStats`](https://docs.opendota.com/), as is | every 6 hours |
+| `data/heroStats.json` | [OpenDota `/api/heroStats`](https://docs.opendota.com/), as is | daily |
 | `data/hero_matchups.bin` | built from OpenDota `/api/publicMatches` (last 14 days, 3 rank brackets), sealed | weekly |
 
 A run that gets a bad or partial response keeps the previous file.

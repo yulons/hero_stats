@@ -60,5 +60,11 @@ jobs:
             exit 0
           fi
           git commit -m "Matchup matrix $(date -u +%Y-%m-%d)"
-          git pull --rebase
+          if ! git pull --rebase; then
+            git rebase --abort
+            echo 'Another run pushed first; keeping its copy'
+            exit 0
+          fi
           git push
+      - name: Purge jsDelivr
+        run: curl -fsS https://purge.jsdelivr.net/gh/yulons/hero_stats@main/data/hero_matchups.bin || echo 'Purge failed; jsDelivr catches up within 12 hours'
