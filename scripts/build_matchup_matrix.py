@@ -14,6 +14,10 @@ The dotaforge data repo runs the same script weekly from a GitHub Action,
 with --out/--hero-stats/--cache pointing into that repo and the key, when
 there is one, in OPENDOTA_API_KEY.
 
+The window never starts before the latest major patch (dotaconstants
+patch.json; letter patches don't count), so the week after a patch counts only
+that patch's matches. --since <unix time> sets the start bound by hand.
+
 Free tier: 60 calls a minute and ~3,000 a day per IP, so one full run a day.
 Pages are kept under build/matchup_pages/, so a run that stops resumes where
 it left off (same --days, within 36 hours). A page that keeps failing is
@@ -45,6 +49,7 @@ OUT = os.path.join(ROOT, 'build', 'hero_matchups.json')
 HERO_STATS = os.path.join(ROOT, 'assets', 'data', 'heroStats.json')
 CACHE = os.path.join(ROOT, 'build', 'matchup_pages')
 API = 'https://api.opendota.com/api'
+PATCHES = 'https://raw.githubusercontent.com/odota/dotaconstants/master/build/patch.json'
 
 # All Pick, Captains Mode, Random Draft, Single Draft, All Random,
 # Captains Draft, Ranked All Pick. Leaves out Turbo, Ability Draft and the
@@ -110,6 +115,21 @@ def match_id_at(timestamp, low, high):
     return high
 
 
+def latest_patch_time():
+    """Release time of the newest major patch, or None if it can't be read."""
+    try:
+        request = urllib.request.Request(PATCHES, headers={'User-Agent': 'dota-forge-build'})
+        with urllib.request.urlopen(request, timeout=60) as response:
+            patches = json.load(response)
+        newest = max(patches, key=lambda p: p['date'])
+        when = datetime.datetime.fromisoformat(newest['date'].replace('Z', '+00:00'))
+        print(f"latest patch {newest['name']} at {when:%Y-%m-%d %H:%M} UTC")
+        return int(when.timestamp())
+    except Exception as e:  # noqa: BLE001 - a missing bound only widens the window
+        print(f'WARNING: no patch date ({e}); window not clamped to the patch')
+        return None
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--pages', type=int, default=2000)
@@ -117,9 +137,12 @@ def main():
     parser.add_argument('--out', default=OUT)
     parser.add_argument('--hero-stats', default=HERO_STATS)
     parser.add_argument('--cache', default=CACHE)
+    parser.add_argument('--since', type=int, default=None,
+                        help='earliest match start (unix time); default: the latest patch')
     args = parser.parse_args()
 
-    cache_dir = os.path.join(args.cache, f'{args.days}d')
+    since = args.since if args.since is not None else latest_patch_time()
+    cache_dir = os.path.join(args.cache, f'{args.days}d' + (f'_{since}' if since else ''))
     window_file = os.path.join(cache_dir, 'window.json')
     if (os.path.exists(window_file)
             and time.time() - os.path.getmtime(window_file) > 36 * 3600):
@@ -134,13 +157,18 @@ def main():
         newest_time = max(m['start_time'] for m in latest)
         end_time = newest_time - SETTLE_SECONDS
         start_time = end_time - args.days * 86400
+        if since and since > start_time:
+            start_time = since
+        if start_time >= end_time:
+            sys.exit('the patch is newer than the settled matches: kept the old file')
         # Match ids grow ~100k an hour; bound the search generously.
         end_id = match_id_at(end_time, newest_id - 3_000_000, newest_id)
-        start_id = match_id_at(start_time, end_id - args.days * 24 * 400_000, end_id)
+        span_hours = (end_time - start_time) / 3600 + 1
+        start_id = match_id_at(start_time, end_id - int(span_hours * 400_000), end_id)
         with open(window_file, 'w') as f:
             json.dump([start_time, end_time, start_id, end_id], f)
-    print(f'window {datetime.date.fromtimestamp(start_time)} → '
-          f'{datetime.date.fromtimestamp(end_time)}, ids {start_id}–{end_id}')
+    print(f'window {datetime.datetime.fromtimestamp(start_time):%Y-%m-%d %H:%M} → '
+          f'{datetime.datetime.fromtimestamp(end_time):%Y-%m-%d %H:%M}, ids {start_id}–{end_id}')
 
     step = (end_id - start_id) // args.pages
     matches = {}
